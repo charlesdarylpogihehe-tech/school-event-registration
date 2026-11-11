@@ -1,91 +1,920 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-const configured = !SUPABASE_URL.includes("YOUR-PROJECT") && !SUPABASE_ANON_KEY.includes("YOUR_SUPABASE");
-const supabase = configured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
-const $ = (s) => document.querySelector(s);
-const esc = (v="") => String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const dateFmt = d => d ? new Date(d+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}) : "";
-const timeFmt = t => t ? new Date("1970-01-01T"+t).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}) : "";
-function notify(message, error=false){const el=$("#toast");if(!el)return;el.hidden=false;el.textContent=message;el.className=error?"alert":"alert success";el.scrollIntoView({behavior:"smooth",block:"center"});}
-function formData(form){return Object.fromEntries(new FormData(form).entries());}
-async function getUser(){if(!supabase)return null;const {data:{user}}=await supabase.auth.getUser();return user;}
-async function profile(user){if(!user)return null;const {data}=await supabase.from("profiles").select("*").eq("id",user.id).maybeSingle();return data;}
-function nav(user,prof){
- const root=document.body.dataset.page?.startsWith("student")||document.body.dataset.page==="event-detail"?"../":"";
- const links=user?`${prof?.role==="admin"?`<a href="${root}admin/dashboard.html">ADMINISTRATION</a>`:""}${prof?.role==="student"?`<a href="${root}student/dashboard.html">MY REGISTRATIONS</a>`:""}<a href="#" id="logout-link">LOG OUT</a>`:`<a href="${root}login.html">LOGIN</a><a href="${root}register.html">STUDENT SIGN UP</a>`;
- const el=$("#site-nav"); if(!el)return;
- el.innerHTML=`<nav class="navbar"><div class="brand-wrap"><div class="brand-seal"><img src="${root}assets/uep-seal.jpg" alt="University emblem"></div><div class="brand">UNIVERSITY EVENT PORTAL<small>STUDENT ACTIVITIES & CAMPUS LIFE</small></div></div><div class="navlinks"><a href="${root}index.html">HOME</a>${links}</div></nav>`;
- $("#logout-link")?.addEventListener("click",async e=>{e.preventDefault();await supabase.auth.signOut();location.href=root+"index.html";});
+
+const configured =
+    !SUPABASE_URL.includes("YOUR-PROJECT") &&
+    !SUPABASE_ANON_KEY.includes("YOUR_SUPABASE");
+
+const supabase = configured
+    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+const $ = (selector) => document.querySelector(selector);
+
+const escapeHTML = (value = "") =>
+    String(value).replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+    })[character]);
+
+function formatDate(date) {
+    if (!date) return "";
+    return new Date(date + "T00:00:00").toLocaleDateString(
+        undefined,
+        { month: "short", day: "numeric", year: "numeric" }
+    );
 }
-function requireConfigured(){if(!supabase){document.body.insertAdjacentHTML("afterbegin",`<div class="alert">Setup required: edit <b>assets/js/config.js</b> and add your Supabase Project URL and anon/public key.</div>`);return false;}return true;}
-async function home(){
- const [{data:events,error},{data:counts}] = await Promise.all([
-  supabase.from("events").select("*").order("event_date").order("event_time"),
-  supabase.rpc("get_event_registration_counts")
- ]);
- const countMap=new Map((counts||[]).map(x=>[x.event_id,Number(x.registered_count)]));
- const list=$("#events-list"); if(error){list.innerHTML=`<div class="card">${esc(error.message)}</div>`;return;}
- if(!events?.length){list.innerHTML='<div class="card"><h3>No events posted yet</h3><p class="muted">Please check again soon.</p></div>';return;}
- list.innerHTML=events.map(e=>{const count=countMap.get(e.id)||0,remaining=Math.max(0,e.capacity-count);return `<article class="card"><span class="badge">${dateFmt(e.event_date)}</span><h3>${esc(e.title)}</h3><p>${esc(e.description)}</p><p class="muted"><strong>Time:</strong> ${timeFmt(e.event_time)}<br><strong>Venue:</strong> ${esc(e.location)}<br><strong>Available slots:</strong> ${remaining} / ${e.capacity}</p><a class="btn" href="${window.__user?"student/event.html?id="+e.id:"login.html"}">${window.__user?"EVENT DETAILS":"LOGIN TO REGISTER"}</a></article>`;}).join("");
+
+function formatTime(time) {
+    if (!time) return "";
+    return new Date("1970-01-01T" + time).toLocaleTimeString(
+        undefined,
+        { hour: "numeric", minute: "2-digit" }
+    );
 }
-async function login(){
- $("#login-form").addEventListener("submit",async e=>{e.preventDefault();const f=formData(e.currentTarget);const {error}=await supabase.auth.signInWithPassword({email:f.email,password:f.password});if(error)return notify(error.message,true);const u=await getUser(),p=await profile(u);location.href=p?.role==="admin"?"admin/dashboard.html":"student/dashboard.html";});
+
+function notify(message, error = false) {
+    const element = $("#toast");
+    if (!element) {
+        alert(message);
+        return;
+    }
+
+    element.hidden = false;
+    element.textContent = message;
+    element.className = error ? "alert" : "alert success";
+    element.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+    });
 }
-async function register(){
- $("#register-form").addEventListener("submit",async e=>{e.preventDefault();const f=formData(e.currentTarget);if(f.password!==f.confirm_password)return notify("Passwords do not match.",true);if(f.password.length<6)return notify("Password must be at least 6 characters.",true);
- const {error}=await supabase.auth.signUp({email:f.email,password:f.password,options:{data:{full_name:f.full_name}}});if(error)return notify(error.message,true);notify("Account created. If email confirmation is enabled, check your inbox to confirm your account before logging in.");e.currentTarget.reset();});
+
+function getFormData(form) {
+    return Object.fromEntries(new FormData(form).entries());
 }
-async function studentDashboard(user,prof){
- $("#welcome").textContent=`Welcome, ${prof?.full_name||user.email}`;
- const {data,error}=await supabase.from("registrations").select("id,registered_at,events(id,title,event_date,event_time,location)").eq("user_id",user.id).order("registered_at",{ascending:false});
- if(error)return notify(error.message,true);
- $("#my-registrations").innerHTML=data.length?data.map(r=>`<tr><td>${esc(r.events.title)}</td><td>${dateFmt(r.events.event_date)}</td><td>${timeFmt(r.events.event_time)}</td><td>${esc(r.events.location)}</td><td><button class="btn danger small" data-cancel="${r.id}">Cancel</button></td></tr>`).join(""):'<tr><td colspan="5">You have no registrations yet. <a href="../index.html">View events</a>.</td></tr>';
- $("#my-registrations").addEventListener("click",async e=>{const id=e.target.dataset.cancel;if(!id)return;if(!confirm("Cancel this registration?"))return;const {error}=await supabase.from("registrations").delete().eq("id",id);if(error)notify(error.message,true);else location.reload();});
+
+async function getUser() {
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error) {
+        console.error(error);
+        return null;
+    }
+
+    return data.user;
 }
-async function eventDetail(user){
- const id=new URLSearchParams(location.search).get("id");const box=$("#event-detail");
- if(!id){box.textContent="No event selected.";return;}
- const {data:e,error}=await supabase.from("events").select("*").eq("id",id).single();
- if(error){box.textContent="Event not found.";return;}
- const {data:countRows}=await supabase.rpc("get_event_registration_counts");const count=Number(countRows?.find(x=>x.event_id===e.id)?.registered_count||0),remaining=Math.max(0,e.capacity-count);
- const {data:mine}=await supabase.from("registrations").select("id").eq("event_id",id).eq("user_id",user.id).maybeSingle();
- box.innerHTML=`<span class="badge">${dateFmt(e.event_date)}</span><h2>${esc(e.title)}</h2><p>${esc(e.description)}</p><p><strong>Date:</strong> ${dateFmt(e.event_date)}<br><strong>Time:</strong> ${timeFmt(e.event_time)}<br><strong>Location:</strong> ${esc(e.location)}<br><strong>Available slots:</strong> ${remaining}</p>${mine?'<div class="alert success">You are already registered for this event.</div>':remaining<=0?'<div class="alert">This event is full.</div>':'<button class="btn" id="register-event">Register for Event</button>'}`;
- $("#register-event")?.addEventListener("click",async()=>{const {error}=await supabase.rpc("register_for_event",{p_event_id:Number(id)});if(error)notify(error.message,true);else{notify("Registration successful!");eventDetail(user);}});
+
+async function getProfile(user) {
+    if (!user) return null;
+
+    const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .maybeSingle();
+
+    if (error) {
+        console.error("Profile error:", error.message);
+        return null;
+    }
+
+    return data;
 }
-async function adminDashboard(){
- const [{count:students},{data:events,error},{count:registrations}] = await Promise.all([
- supabase.from("profiles").select("*",{count:"exact",head:true}).eq("role","student"),
- supabase.from("events").select("*").order("event_date",{ascending:false}),
- supabase.from("registrations").select("*",{count:"exact",head:true})
- ]);
- if(error)return notify(error.message,true);
- $("#student-count").textContent=students??0;$("#event-count").textContent=events.length;$("#registration-count").textContent=registrations??0;
- const {data:counts}=await supabase.rpc("get_event_registration_counts");const countMap=new Map((counts||[]).map(x=>[x.event_id,Number(x.registered_count)]));\n $("#admin-events").innerHTML=events.map(e=>{const n=countMap.get(e.id)||0;return `<tr><td>${esc(e.title)}</td><td>${dateFmt(e.event_date)}</td><td>${esc(e.location)}</td><td>${n} / ${e.capacity}</td><td class="actions"><a class="btn small" href="participants.html?id=${e.id}">Participants</a> <a class="btn secondary small" href="edit-event.html?id=${e.id}">Edit</a> <button class="btn danger small" data-delete="${e.id}">Delete</button></td></tr>`;}).join("")||'<tr><td colspan="5">No events yet.</td></tr>';
- $("#admin-events").addEventListener("click",async e=>{const id=e.target.dataset.delete;if(!id)return;if(!confirm("Delete this event and its registrations?"))return;const {error}=await supabase.from("events").delete().eq("id",id);if(error)notify(error.message,true);else location.reload();});
+
+function showSetupError() {
+    document.body.insertAdjacentHTML(
+        "afterbegin",
+        `<div class="alert">
+            Setup required: Open assets/js/config.js and enter your
+            Supabase Project URL and public anon key.
+        </div>`
+    );
 }
-async function eventForm(){
- const id=new URLSearchParams(location.search).get("id"),editing=!!id;
- if(editing){$("#event-form-title").textContent="Edit Event";const {data,error}=await supabase.from("events").select("*").eq("id",id).single();if(error)return notify(error.message,true);for(const [k,v] of Object.entries(data)){const el=$(`[name="${k}"]`);if(el)el.value=v??"";}}
- $("#event-form").addEventListener("submit",async e=>{e.preventDefault();const f=formData(e.currentTarget);f.capacity=Number(f.capacity);const result=editing?await supabase.from("events").update(f).eq("id",id):await supabase.from("events").insert(f);if(result.error)return notify(result.error.message,true);location.href="dashboard.html";});
+
+function setupNavigation(user, profile) {
+    const page = document.body.dataset.page;
+
+    const isNested =
+        page.startsWith("student-") ||
+        page.startsWith("admin-") ||
+        page === "event-detail" ||
+        page === "event-form" ||
+        page === "participants";
+
+    const root = isNested ? "../" : "";
+
+    let accountLinks = "";
+
+    if (user) {
+        if (profile?.role === "admin") {
+            accountLinks +=
+                <a href="${root}admin/dashboard.html">ADMINISTRATION</a>;
+        }
+
+        if (profile?.role === "student") {
+            accountLinks +=
+                <a href="${root}student/dashboard.html">MY REGISTRATIONS</a>;
+        }
+
+        accountLinks +=
+            <a href="#" id="logout-link">LOG OUT</a>;
+    } else {
+        accountLinks =
+            `<a href="${root}login.html">LOGIN</a>
+             <a href="${root}register.html">STUDENT SIGN UP</a>`;
+    }
+
+    const navigation = $("#site-nav");
+
+    if (!navigation) return;
+
+    navigation.innerHTML = `
+        <nav class="navbar">
+            <div class="brand-wrap">
+                <div class="brand-seal">
+                    <img src="${root}assets/uep-seal.jpg"
+                         alt="University emblem">
+                </div>
+
+                <div class="brand">
+                    UNIVERSITY EVENT PORTAL
+                    <small>STUDENT ACTIVITIES & CAMPUS LIFE</small>
+                </div>
+            </div>
+
+            <div class="navlinks">
+                <a href="${root}index.html">HOME</a>
+                ${accountLinks}
+            </div>
+        </nav>
+    `;
+
+    $("#logout-link")?.addEventListener("click", async (event) => {
+        event.preventDefault();
+
+        const { error } = await supabase.auth.signOut();
+
+        if (error) {
+            notify(error.message, true);
+            return;
+        }
+
+        location.href = root + "index.html";
+    });
 }
-async function participants(){
- const id=new URLSearchParams(location.search).get("id");
- const [{data:event,error:eerr},{data:rows,error}] = await Promise.all([
- supabase.from("events").select("title").eq("id",id).single(),
- supabase.from("registrations").select("registered_at,profiles(full_name,email)").eq("event_id",id).order("registered_at")
- ]);
- if(eerr||error)return notify((eerr||error).message,true);
- $("#participants-title").textContent=`${event.title} — ${rows.length} participant(s)`;
- $("#participants-list").innerHTML=rows.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.profiles?.full_name||"")}</td><td>${esc(r.profiles?.email||"")}</td><td>${new Date(r.registered_at).toLocaleString()}</td></tr>`).join("")||'<tr><td colspan="4">No participants registered yet.</td></tr>';
+
+// ========================================
+// HOMEPAGE
+// ========================================
+
+async function loadHomepage() {
+    const list = $("#events-list");
+
+    if (!list) return;
+
+    const [eventsResult, countsResult] = await Promise.all([
+        supabase
+            .from("events")
+            .select("*")
+            .order("event_date")
+            .order("event_time"),
+
+        supabase.rpc("get_event_registration_counts")
+    ]);
+
+    if (eventsResult.error) {
+        list.innerHTML =
+            `<div class="card">Unable to load events: ${
+                escapeHTML(eventsResult.error.message)
+            }</div>`;
+        return;
+    }
+
+    if (countsResult.error) {
+        console.error("Registration counts:", countsResult.error);
+    }
+
+    const events = eventsResult.data || [];
+    const counts = countsResult.data || [];
+
+    const countMap = new Map(
+        counts.map(item => [
+            item.event_id,
+            Number(item.registered_count)
+        ])
+    );
+
+    if (events.length === 0) {
+        list.innerHTML = `
+            <div class="card">
+                <h3>No Events Available</h3>
+                <p>Please check again later.</p>
+            </div>
+        `;
+        return;
+    }
+
+    list.innerHTML = events.map(event => {
+        const registered = countMap.get(event.id) || 0;
+        const available = Math.max(
+            0,
+            event.capacity - registered
+        );
+
+        const eventLink = window.currentUser
+            ? student/event.html?id=${event.id}
+            : "login.html";
+
+        return `
+            <article class="card">
+                <span class="badge">
+                    ${formatDate(event.event_date)}
+                </span>
+
+                <h3>${escapeHTML(event.title)}</h3>
+
+                <p>${escapeHTML(event.description)}</p>
+
+                <p class="muted">
+                    <strong>Time:</strong>
+                    ${formatTime(event.event_time)}
+                    <br>
+
+                    <strong>Venue:</strong>
+                    ${escapeHTML(event.location)}
+                    <br>
+
+                    <strong>Available slots:</strong>
+                    ${available} / ${event.capacity}
+                </p>
+
+                <a class="btn" href="${eventLink}">
+                    ${window.currentUser
+                        ? "EVENT DETAILS"
+                        : "LOGIN TO REGISTER"}
+                </a>
+            </article>
+        `;
+    }).join("");
 }
-(async()=>{
- const page=document.body.dataset.page;
- if(!requireConfigured())return;
- const user=await getUser(),prof=await profile(user);window.__user=!!user;nav(user,prof);
- if(page==="home")return home();
- if(page==="login")return login();
- if(page==="register")return register();
- if(page==="student-dashboard"){if(!user){location.href="../login.html";return;}if(prof?.role!=="student"){location.href="../index.html";return;}return studentDashboard(user,prof);}
- if(page==="event-detail"){if(!user){location.href="../login.html";return;}return eventDetail(user);}
- if(page==="admin-dashboard"||page==="event-form"||page==="participants"){if(!user){location.href="../login.html";return;}if(prof?.role!=="admin"){location.href="../index.html";return;}if(page==="admin-dashboard")return adminDashboard();if(page==="event-form")return eventForm();return participants();}
-})();
+
+// ========================================
+// STUDENT LOGIN
+// ========================================
+
+async function loginStudent() {
+    const form = $("#login-form");
+
+    if (!form) return;
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const data = getFormData(form);
+
+        const { error } = await supabase.auth.signInWithPassword({
+            email: data.email,
+            password: data.password
+        });
+
+        if (error) {
+            notify(error.message, true);
+            return;
+        }
+
+        const user = await getUser();
+        const profile = await getProfile(user);
+
+        if (profile?.role === "admin") {
+            location.href = "admin/dashboard.html";
+        } else {
+            location.href = "student/dashboard.html";
+        }
+    });
+}
+
+// ========================================
+// STUDENT REGISTRATION / SIGN UP
+// ========================================
+
+async function registerStudent() {
+    const form = $("#register-form");
+
+    if (!form) return;
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const data = getFormData(form);
+
+        if (data.password !== data.confirm_password) {
+            notify("Passwords do not match.", true);
+            return;
+        }
+
+        if (data.password.length < 6) {
+            notify("Password must contain at least 6 characters.", true);
+            return;
+        }
+
+        const { error } = await supabase.auth.signUp({
+            email: data.email,
+            password: data.password,
+            options: {
+                data: {
+                    full_name: data.full_name
+                }
+            }
+        });
+
+        if (error) {
+            notify(error.message, true);
+            return;
+        }
+
+        form.reset();
+
+        notify(
+            "Account created successfully! Check your email if confirmation is required before logging in."
+        );
+    });
+}
+
+// ========================================
+// STUDENT DASHBOARD
+// ========================================
+
+async function loadStudentDashboard(user, profile) {
+    const welcome = $("#welcome");
+
+    if (welcome) {
+        welcome.textContent =
+            Welcome, ${profile?.full_name || user.email};
+    }
+
+    const table = $("#my-registrations");
+
+    if (!table) return;
+
+    const { data, error } = await supabase
+        .from("registrations")
+        .select(`
+            id,
+            registered_at,
+            events (
+                id,
+                title,
+                event_date,
+                event_time,
+                location
+            )
+        `)
+        .eq("user_id", user.id)
+        .order("registered_at", { ascending: false });
+
+    if (error) {
+        notify(error.message, true);
+        return;
+    }
+
+    if (!data || data.length === 0) {
+        table.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    You have no registrations yet.
+                    <a href="../index.html">Browse events</a>.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    table.innerHTML = data
+        .filter(row => row.events)
+        .map(row => `
+            <tr>
+                <td>${escapeHTML(row.events.title)}</td>
+                <td>${formatDate(row.events.event_date)}</td>
+                <td>${formatTime(row.events.event_time)}</td>
+                <td>${escapeHTML(row.events.location)}</td>
+                <td>
+                    <button
+                        class="btn danger small"
+                        data-cancel="${row.id}">
+                        Cancel
+                    </button>
+                </td>
+            </tr>
+        `).join("");
+
+    table.addEventListener("click", async (event) => {
+        const id = event.target.dataset.cancel;
+
+        if (!id) return;
+
+        if (!confirm("Are you sure you want to cancel this registration?")) {
+            return;
+        }
+
+        const { error } = await supabase
+            .from("registrations")
+            .delete()
+            .eq("id", id);
+
+        if (error) {
+            notify(error.message, true);
+            return;
+        }
+
+        notify("Registration cancelled successfully.");
+        loadStudentDashboard(user, profile);
+    });
+}
+
+// ========================================
+// EVENT DETAILS AND REGISTRATION
+// ========================================
+
+async function loadEventDetails(user) {
+    const box = $("#event-detail");
+
+    if (!box) return;
+
+    const eventId = new URLSearchParams(
+        location.search
+    ).get("id");
+
+    if (!eventId) {
+        box.textContent = "No event selected.";
+        return;
+    }
+
+    const { data: event, error } = await supabase
+        .from("events")
+        .select("*")
+        .eq("id", eventId)
+        .single();
+
+    if (error) {
+        box.textContent = "Event not found.";
+        return;
+    }
+
+    const { data: counts, error: countError } = await supabase
+        .rpc("get_event_registration_counts");
+
+    if (countError) {
+        notify(countError.message, true);
+        return;
+    }
+
+    const count = Number(
+        counts.find(item => item.event_id === event.id)
+            ?.registered_count || 0
+    );
+
+    const available = Math.max(
+        0,
+        event.capacity - count
+    );
+
+    const { data: registration, error: registrationError } =
+        await supabase
+            .from("registrations")
+            .select("id")
+            .eq("event_id", eventId)
+            .eq("user_id", user.id)
+            .maybeSingle();
+
+    if (registrationError) {
+        notify(registrationError.message, true);
+        return;
+    }
+
+    box.innerHTML = `
+        <span class="badge">
+            ${formatDate(event.event_date)}
+        </span>
+
+        <h2>${escapeHTML(event.title)}</h2>
+
+        <p>${escapeHTML(event.description)}</p>
+
+        <p>
+            <strong>Date:</strong>
+            ${formatDate(event.event_date)}
+            <br>
+
+            <strong>Time:</strong>
+            ${formatTime(event.event_time)}
+            <br>
+
+            <strong>Location:</strong>
+            ${escapeHTML(event.location)}
+            <br>
+
+            <strong>Available Slots:</strong>
+            ${available}
+        </p>
+
+        ${
+            registration
+                ? `<div class="alert success">
+                    You are already registered for this event.
+                   </div>`
+                : available <= 0
+                    ? `<div class="alert">
+                        This event is already full.
+                       </div>`
+                    : `<button class="btn" id="register-event">
+                        Register for Event
+                       </button>`
+        }
+    `;
+
+    $("#register-event")?.addEventListener("click", async () => {
+        const button = $("#register-event");
+
+        button.disabled = true;
+        button.textContent = "Registering...";
+
+        const { error } = await supabase.rpc(
+            "register_for_event",
+            {
+                p_event_id: Number(eventId)
+            }
+        );
+
+        if (error) {
+            notify(error.message, true);
+            button.disabled = false;
+            button.textContent = "Register for Event";
+            return;
+        }
+
+        notify("You have successfully registered!");
+        await loadEventDetails(user);
+    });
+}
+
+// ========================================
+// ADMIN DASHBOARD
+// ========================================
+
+async function loadAdminDashboard() {
+    const [
+        studentResult,
+        eventResult,
+        registrationResult,
+        countResult
+    ] = await Promise.all([
+        supabase
+            .from("profiles")
+            .select("*", { count: "exact", head: true })
+            .eq("role", "student"),
+
+        supabase
+            .from("events")
+            .select("*")
+            .order("event_date", { ascending: false }),
+
+        supabase
+            .from("registrations")
+            .select("*", { count: "exact", head: true }),
+
+        supabase.rpc("get_event_registration_counts")
+    ]);
+
+    if (eventResult.error) {
+        notify(eventResult.error.message, true);
+        return;
+    }
+
+    $("#student-count").textContent =
+        studentResult.count ?? 0;
+
+    $("#event-count").textContent =
+        eventResult.data.length;
+
+    $("#registration-count").textContent =
+        registrationResult.count ?? 0;
+
+    if (countResult.error) {
+        notify(countResult.error.message, true);
+        return;
+    }
+
+    const countMap = new Map(
+        countResult.data.map(item => [
+            item.event_id,
+            Number(item.registered_count)
+        ])
+    );
+
+    const events = eventResult.data || [];
+
+    $("#admin-events").innerHTML = events.map(event => {
+        const registered = countMap.get(event.id) || 0;
+
+        return `
+            <tr>
+                <td>${escapeHTML(event.title)}</td>
+
+                <td>${formatDate(event.event_date)}</td>
+
+                <td>${escapeHTML(event.location)}</td>
+
+                <td>
+                    ${registered} / ${event.capacity}
+                </td>
+
+                <td class="actions">
+                    <a class="btn small"
+                       href="participants.html?id=${event.id}">
+                       Participants
+                    </a>
+
+                    <a class="btn secondary small"
+                       href="edit-event.html?id=${event.id}">
+                       Edit
+                    </a>
+
+                    <button
+                        class="btn danger small"
+                        data-delete="${event.id}">
+                        Delete
+                    </button>
+                </td>
+            </tr>
+        `;
+    }).join("") || `
+        <tr>
+            <td colspan="5">No events available.</td>
+        </tr>
+    `;
+
+    $("#admin-events").addEventListener("click", async (event) => {
+        const id = event.target.dataset.delete;
+
+        if (!id) return;
+
+        if (!confirm("Delete this event and its registrations?")) {
+            return;
+        }
+
+        const { error } = await supabase
+            .from("events")
+            .delete()
+            .eq("id", id);
+
+        if (error) {
+            notify(error.message, true);
+            return;
+        }
+
+        notify("Event deleted successfully.");
+        await loadAdminDashboard();
+    });
+}
+
+// ========================================
+// CREATE AND EDIT EVENTS
+// ========================================
+
+async function handleEventForm() {
+    const form = $("#event-form");
+
+    if (!form) return;
+
+    const eventId = new URLSearchParams(
+        location.search
+    ).get("id");
+
+    const editing = Boolean(eventId);
+
+    if (editing) {
+        $("#event-form-title").textContent = "Edit Event";
+
+        const { data, error } = await supabase
+            .from("events")
+            .select("*")
+            .eq("id", eventId)
+            .single();
+
+        if (error) {
+            notify(error.message, true);
+            return;
+        }
+
+        for (const [key, value] of Object.entries(data)) {
+            const input = form.querySelector([name="${key}"]);
+
+            if (input) {
+                input.value = value ?? "";
+            }
+        }
+    }
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const data = getFormData(form);
+
+        data.capacity = Number(data.capacity);
+
+        const result = editing
+            ? await supabase
+                .from("events")
+                .update(data)
+                .eq("id", eventId)
+            : await supabase
+                .from("events")
+                .insert(data);
+
+        if (result.error) {
+            notify(result.error.message, true);
+            return;
+        }
+
+        notify(
+            editing
+                ? "Event updated successfully."
+                : "Event created successfully."
+        );
+
+        location.href = "dashboard.html";
+    });
+}
+
+// ========================================
+// EVENT PARTICIPANTS
+// ========================================
+
+async function loadParticipants() {
+    const eventId = new URLSearchParams(
+        location.search
+    ).get("id");
+
+    if (!eventId) {
+        notify("No event selected.", true);
+        return;
+    }
+
+    const [eventResult, participantResult] = await Promise.all([
+        supabase
+            .from("events")
+            .select("title")
+            .eq("id", eventId)
+            .single(),
+
+        supabase
+            .from("registrations")
+            .select(`
+                registered_at,
+                profiles (
+                    full_name,
+                    email
+                )
+            `)
+            .eq("event_id", eventId)
+            .order("registered_at")
+    ]);
+
+    if (eventResult.error || participantResult.error) {
+        notify(
+            eventResult.error?.message ||
+            participantResult.error?.message,
+            true
+        );
+        return;
+    }
+
+    const participants = participantResult.data || [];
+
+    $("#participants-title").textContent =
+        ${eventResult.data.title} — ${participants.length} participant(s);
+
+    $("#participants-list").innerHTML = participants.map(
+        (participant, index) => `
+            <tr>
+                <td>${index + 1}</td>
+
+                <td>
+                    ${escapeHTML(
+                        participant.profiles?.full_name || "Unknown"
+                    )}
+                </td>
+
+                <td>
+                    ${escapeHTML(
+                        participant.profiles?.email || "Not available"
+                    )}
+                </td>
+
+                <td>
+                    ${new Date(
+                        participant.registered_at
+                    ).toLocaleString()}
+                </td>
+            </tr>
+        `
+    ).join("") || `
+        <tr>
+            <td colspan="4">
+                No participants registered yet.
+            </td>
+        </tr>
+    `;
+}
+
+// ========================================
+// APPLICATION INITIALIZATION
+// ========================================
+
+async function initializeApp() {
+    if (!supabase) {
+        showSetupError();
+        return;
+    }
+
+    const page = document.body.dataset.page;
+
+    const user = await getUser();
+    const profile = await getProfile(user);
+
+    window.currentUser = user;
+
+    setupNavigation(user, profile);
+
+    switch (page) {
+        case "home":
+            await loadHomepage();
+            break;
+
+        case "login":
+            loginStudent();
+            break;
+
+        case "register":
+            registerStudent();
+            break;
+
+        case "student-dashboard":
+            if (!user) {
+                location.href = "../login.html";
+                return;
+            }
+
+            if (profile?.role !== "student") {
+                location.href = "../index.html";
+                return;
+            }
+
+            await loadStudentDashboard(user, profile);
+            break;
+
+        case "event-detail":
+            if (!user) {
+                location.href = "../login.html";
+                return;
+            }
+
+            await loadEventDetails(user);
+            break;
+
+        case "admin-dashboard":
+        case "event-form":
+        case "participants":
+
+            if (!user) {
+                location.href = "../login.html";
+                return;
+            }
+
+            if (profile?.role !== "admin") {
+                location.href = "../index.html";
+                return;
+            }
+
+            if (page === "admin-dashboard") {
+                await loadAdminDashboard();
+            } else if (page === "event-form") {
+                await handleEventForm();
+            } else {
+                await loadParticipants();
+            }
+
+            break;
+
+        default:
+            console.warn("Unknown page:", page);
+    }
+}
+
+initializeApp().catch(error => {
+    console.error("Application error:", error);
+    notify("Something went wrong. Check the browser console.", true);
+});
