@@ -1,43 +1,22 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
-const configured =
-    !SUPABASE_URL.includes("YOUR-PROJECT") &&
-    !SUPABASE_ANON_KEY.includes("YOUR_SUPABASE");
-
-const supabase = configured
-    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const $ = (selector) => document.querySelector(selector);
 
 const escapeHTML = (value = "") =>
-    String(value).replace(/[&<>"']/g, (character) => ({
+    String(value).replace(/[&<>"']/g, (c) => ({
         "&": "&amp;",
         "<": "&lt;",
         ">": "&gt;",
         '"': "&quot;",
         "'": "&#39;"
-    })[character]);
-
-function formatDate(date) {
-    if (!date) return "";
-    return new Date(date + "T00:00:00").toLocaleDateString(
-        undefined,
-        { month: "short", day: "numeric", year: "numeric" }
-    );
-}
-
-function formatTime(time) {
-    if (!time) return "";
-    return new Date("1970-01-01T" + time).toLocaleTimeString(
-        undefined,
-        { hour: "numeric", minute: "2-digit" }
-    );
-}
+    })[c]);
 
 function notify(message, error = false) {
     const element = $("#toast");
+
     if (!element) {
         alert(message);
         return;
@@ -46,15 +25,40 @@ function notify(message, error = false) {
     element.hidden = false;
     element.textContent = message;
     element.className = error ? "alert" : "alert success";
-    element.scrollIntoView({
-        behavior: "smooth",
-        block: "center"
-    });
 }
 
 function getFormData(form) {
     return Object.fromEntries(new FormData(form).entries());
 }
+
+function formatDate(date) {
+    if (!date) return "";
+
+    return new Date(date + "T00:00:00").toLocaleDateString(
+        undefined,
+        {
+            month: "short",
+            day: "numeric",
+            year: "numeric"
+        }
+    );
+}
+
+function formatTime(time) {
+    if (!time) return "";
+
+    return new Date("1970-01-01T" + time).toLocaleTimeString(
+        undefined,
+        {
+            hour: "numeric",
+            minute: "2-digit"
+        }
+    );
+}
+
+// ========================================
+// AUTHENTICATION
+// ========================================
 
 async function getUser() {
     const { data, error } = await supabase.auth.getUser();
@@ -84,18 +88,12 @@ async function getProfile(user) {
     return data;
 }
 
-function showSetupError() {
-    document.body.insertAdjacentHTML(
-        "afterbegin",
-        `<div class="alert">
-            Setup required: Open assets/js/config.js and enter your
-            Supabase Project URL and public anon key.
-        </div>`
-    );
-}
+// ========================================
+// NAVIGATION
+// ========================================
 
 function setupNavigation(user, profile) {
-    const page = document.body.dataset.page;
+    const page = document.body.dataset.page || "";
 
     const isNested =
         page.startsWith("student-") ||
@@ -109,61 +107,62 @@ function setupNavigation(user, profile) {
     let accountLinks = "";
 
     if (user) {
-        if (profile?.role === "admin") {
+        if (profile && profile.role === "admin") {
             accountLinks +=
-                <a href="${root}admin/dashboard.html">ADMINISTRATION</a>;
+                '<a href="' + root + 'admin/dashboard.html">ADMINISTRATION</a>';
         }
 
-        if (profile?.role === "student") {
+        if (profile && profile.role === "student") {
             accountLinks +=
-                <a href="${root}student/dashboard.html">MY REGISTRATIONS</a>;
+                '<a href="' + root + 'student/dashboard.html">MY REGISTRATIONS</a>';
         }
 
         accountLinks +=
-            <a href="#" id="logout-link">LOG OUT</a>;
+            '<a href="#" id="logout-link">LOG OUT</a>';
+
     } else {
         accountLinks =
-            `<a href="${root}login.html">LOGIN</a>
-             <a href="${root}register.html">STUDENT SIGN UP</a>`;
+            '<a href="' + root + 'login.html">LOGIN</a>' +
+            '<a href="' + root + 'register.html">STUDENT SIGN UP</a>';
     }
 
     const navigation = $("#site-nav");
 
     if (!navigation) return;
 
-    navigation.innerHTML = `
-        <nav class="navbar">
-            <div class="brand-wrap">
-                <div class="brand-seal">
-                    <img src="${root}assets/uep-seal.jpg"
-                         alt="University emblem">
-                </div>
+    navigation.innerHTML =
+        '<nav class="navbar">' +
+            '<div class="brand-wrap">' +
+                '<div class="brand-seal">' +
+                    '<img src="' + root + 'assets/uep-seal.jpg" alt="University emblem">' +
+                '</div>' +
+                '<div class="brand">' +
+                    'UNIVERSITY EVENT PORTAL' +
+                    '<small>STUDENT ACTIVITIES & CAMPUS LIFE</small>' +
+                '</div>' +
+            '</div>' +
+            '<div class="navlinks">' +
+                '<a href="' + root + 'index.html">HOME</a>' +
+                accountLinks +
+            '</div>' +
+        '</nav>';
 
-                <div class="brand">
-                    UNIVERSITY EVENT PORTAL
-                    <small>STUDENT ACTIVITIES & CAMPUS LIFE</small>
-                </div>
-            </div>
+    const logoutLink = $("#logout-link");
 
-            <div class="navlinks">
-                <a href="${root}index.html">HOME</a>
-                ${accountLinks}
-            </div>
-        </nav>
-    `;
+    if (logoutLink) {
+        logoutLink.addEventListener("click", async function(event) {
+            event.preventDefault();
 
-    $("#logout-link")?.addEventListener("click", async (event) => {
-        event.preventDefault();
+            const { error } = await supabase.auth.signOut();
 
-        const { error } = await supabase.auth.signOut();
+            if (error) {
+                notify(error.message, true);
+                return;
+            }
 
-        if (error) {
-            notify(error.message, true);
-            return;
-        }
-
-        location.href = root + "index.html";
-    });
+            location.href = root + "index.html";
+        });
+    }
 }
 
 // ========================================
@@ -175,57 +174,60 @@ async function loadHomepage() {
 
     if (!list) return;
 
-    const [eventsResult, countsResult] = await Promise.all([
-        supabase
-            .from("events")
-            .select("*")
-            .order("event_date")
-            .order("event_time"),
+    list.innerHTML = "Loading events...";
 
-        supabase.rpc("get_event_registration_counts")
-    ]);
+    const { data: events, error } = await supabase
+        .from("events")
+        .select("*")
+        .order("event_date")
+        .order("event_time");
 
-    if (eventsResult.error) {
+    if (error) {
         list.innerHTML =
-            `<div class="card">Unable to load events: ${
-                escapeHTML(eventsResult.error.message)
-            }</div>`;
+            '<div class="card">Unable to load events: ' +
+            escapeHTML(error.message) +
+            '</div>';
+
+        console.error(error);
         return;
     }
 
-    if (countsResult.error) {
-        console.error("Registration counts:", countsResult.error);
-    }
+    const { data: counts, error: countError } = await supabase
+        .rpc("get_event_registration_counts");
 
-    const events = eventsResult.data || [];
-    const counts = countsResult.data || [];
+    if (countError) {
+        console.error("Registration counts:", countError);
+    }
 
     const countMap = new Map(
-        counts.map(item => [
-            item.event_id,
-            Number(item.registered_count)
-        ])
+        (counts || []).map(function(item) {
+            return [
+                item.event_id,
+                Number(item.registered_count)
+            ];
+        })
     );
 
-    if (events.length === 0) {
-        list.innerHTML = `
-            <div class="card">
-                <h3>No Events Available</h3>
-                <p>Please check again later.</p>
-            </div>
-        `;
+    if (!events || events.length === 0) {
+        list.innerHTML =
+            '<div class="card">' +
+                '<h3>No Events Available</h3>' +
+                '<p>Please check again later.</p>' +
+            '</div>';
+
         return;
     }
 
-    list.innerHTML = events.map(event => {
+    list.innerHTML = events.map(function(event) {
         const registered = countMap.get(event.id) || 0;
+
         const available = Math.max(
             0,
-            event.capacity - registered
+            Number(event.capacity) - registered
         );
 
         const eventLink = window.currentUser
-            ? student/event.html?id=${event.id}
+            ? "student/event.html?id=" + event.id
             : "login.html";
 
         return `
@@ -236,7 +238,7 @@ async function loadHomepage() {
 
                 <h3>${escapeHTML(event.title)}</h3>
 
-                <p>${escapeHTML(event.description)}</p>
+                <p>${escapeHTML(event.description || "")}</p>
 
                 <p class="muted">
                     <strong>Time:</strong>
@@ -244,7 +246,7 @@ async function loadHomepage() {
                     <br>
 
                     <strong>Venue:</strong>
-                    ${escapeHTML(event.location)}
+                    ${escapeHTML(event.location || "")}
                     <br>
 
                     <strong>Available slots:</strong>
@@ -270,7 +272,7 @@ async function loginStudent() {
 
     if (!form) return;
 
-    form.addEventListener("submit", async (event) => {
+    form.addEventListener("submit", async function(event) {
         event.preventDefault();
 
         const data = getFormData(form);
@@ -288,7 +290,7 @@ async function loginStudent() {
         const user = await getUser();
         const profile = await getProfile(user);
 
-        if (profile?.role === "admin") {
+        if (profile && profile.role === "admin") {
             location.href = "admin/dashboard.html";
         } else {
             location.href = "student/dashboard.html";
@@ -297,7 +299,7 @@ async function loginStudent() {
 }
 
 // ========================================
-// STUDENT REGISTRATION / SIGN UP
+// STUDENT REGISTRATION
 // ========================================
 
 async function registerStudent() {
@@ -305,7 +307,7 @@ async function registerStudent() {
 
     if (!form) return;
 
-    form.addEventListener("submit", async (event) => {
+    form.addEventListener("submit", async function(event) {
         event.preventDefault();
 
         const data = getFormData(form);
@@ -315,7 +317,7 @@ async function registerStudent() {
             return;
         }
 
-        if (data.password.length < 6) {
+        if (!data.password || data.password.length < 6) {
             notify("Password must contain at least 6 characters.", true);
             return;
         }
@@ -338,7 +340,7 @@ async function registerStudent() {
         form.reset();
 
         notify(
-            "Account created successfully! Check your email if confirmation is required before logging in."
+            "Account created successfully! Check your email if confirmation is required."
         );
     });
 }
@@ -352,7 +354,7 @@ async function loadStudentDashboard(user, profile) {
 
     if (welcome) {
         welcome.textContent =
-            Welcome, ${profile?.full_name || user.email};
+            "Welcome, " + (profile?.full_name || user.email);
     }
 
     const table = $("#my-registrations");
@@ -389,31 +391,38 @@ async function loadStudentDashboard(user, profile) {
                 </td>
             </tr>
         `;
+
         return;
     }
 
     table.innerHTML = data
-        .filter(row => row.events)
-        .map(row => `
-            <tr>
-                <td>${escapeHTML(row.events.title)}</td>
-                <td>${formatDate(row.events.event_date)}</td>
-                <td>${formatTime(row.events.event_time)}</td>
-                <td>${escapeHTML(row.events.location)}</td>
-                <td>
-                    <button
-                        class="btn danger small"
-                        data-cancel="${row.id}">
-                        Cancel
-                    </button>
-                </td>
-            </tr>
-        `).join("");
+        .filter(function(row) {
+            return row.events;
+        })
+        .map(function(row) {
+            return `
+                <tr>
+                    <td>${escapeHTML(row.events.title)}</td>
+                    <td>${formatDate(row.events.event_date)}</td>
+                    <td>${formatTime(row.events.event_time)}</td>
+                    <td>${escapeHTML(row.events.location)}</td>
+                    <td>
+                        <button
+                            class="btn danger small"
+                            data-cancel="${row.id}">
+                            Cancel
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join("");
 
-    table.addEventListener("click", async (event) => {
-        const id = event.target.dataset.cancel;
+    table.onclick = async function(event) {
+        const button = event.target.closest("[data-cancel]");
 
-        if (!id) return;
+        if (!button) return;
+
+        const id = button.dataset.cancel;
 
         if (!confirm("Are you sure you want to cancel this registration?")) {
             return;
@@ -430,12 +439,13 @@ async function loadStudentDashboard(user, profile) {
         }
 
         notify("Registration cancelled successfully.");
-        loadStudentDashboard(user, profile);
-    });
+
+        await loadStudentDashboard(user, profile);
+    };
 }
 
 // ========================================
-// EVENT DETAILS AND REGISTRATION
+// EVENT DETAILS
 // ========================================
 
 async function loadEventDetails(user) {
@@ -472,13 +482,14 @@ async function loadEventDetails(user) {
     }
 
     const count = Number(
-        counts.find(item => item.event_id === event.id)
-            ?.registered_count || 0
+        (counts || []).find(function(item) {
+            return item.event_id === event.id;
+        })?.registered_count || 0
     );
 
     const available = Math.max(
         0,
-        event.capacity - count
+        Number(event.capacity) - count
     );
 
     const { data: registration, error: registrationError } =
@@ -501,7 +512,7 @@ async function loadEventDetails(user) {
 
         <h2>${escapeHTML(event.title)}</h2>
 
-        <p>${escapeHTML(event.description)}</p>
+        <p>${escapeHTML(event.description || "")}</p>
 
         <p>
             <strong>Date:</strong>
@@ -513,7 +524,7 @@ async function loadEventDetails(user) {
             <br>
 
             <strong>Location:</strong>
-            ${escapeHTML(event.location)}
+            ${escapeHTML(event.location || "")}
             <br>
 
             <strong>Available Slots:</strong>
@@ -522,42 +533,41 @@ async function loadEventDetails(user) {
 
         ${
             registration
-                ? `<div class="alert success">
-                    You are already registered for this event.
-                   </div>`
+                ? '<div class="alert success">You are already registered for this event.</div>'
                 : available <= 0
-                    ? `<div class="alert">
-                        This event is already full.
-                       </div>`
-                    : `<button class="btn" id="register-event">
-                        Register for Event
-                       </button>`
+                    ? '<div class="alert">This event is already full.</div>'
+                    : '<button class="btn" id="register-event">Register for Event</button>'
         }
     `;
 
-    $("#register-event")?.addEventListener("click", async () => {
-        const button = $("#register-event");
+    const registerButton = $("#register-event");
 
-        button.disabled = true;
-        button.textContent = "Registering...";
+    if (registerButton) {
+        registerButton.addEventListener("click", async function() {
+            registerButton.disabled = true;
+            registerButton.textContent = "Registering...";
 
-        const { error } = await supabase.rpc(
-            "register_for_event",
-            {
-                p_event_id: Number(eventId)
+            const { error } = await supabase.rpc(
+                "register_for_event",
+                {
+                    p_event_id: Number(eventId)
+                }
+            );
+
+            if (error) {
+                notify(error.message, true);
+
+                registerButton.disabled = false;
+                registerButton.textContent = "Register for Event";
+
+                return;
             }
-        );
 
-        if (error) {
-            notify(error.message, true);
-            button.disabled = false;
-            button.textContent = "Register for Event";
-            return;
-        }
+            notify("You have successfully registered!");
 
-        notify("You have successfully registered!");
-        await loadEventDetails(user);
-    });
+            await loadEventDetails(user);
+        });
+    }
 }
 
 // ========================================
@@ -588,48 +598,64 @@ async function loadAdminDashboard() {
         supabase.rpc("get_event_registration_counts")
     ]);
 
+    if (studentResult.error) {
+        notify(studentResult.error.message, true);
+        return;
+    }
+
     if (eventResult.error) {
         notify(eventResult.error.message, true);
         return;
     }
 
-    $("#student-count").textContent =
-        studentResult.count ?? 0;
-
-    $("#event-count").textContent =
-        eventResult.data.length;
-
-    $("#registration-count").textContent =
-        registrationResult.count ?? 0;
+    if (registrationResult.error) {
+        notify(registrationResult.error.message, true);
+        return;
+    }
 
     if (countResult.error) {
         notify(countResult.error.message, true);
         return;
     }
 
+    if ($("#student-count")) {
+        $("#student-count").textContent =
+            studentResult.count ?? 0;
+    }
+
+    if ($("#event-count")) {
+        $("#event-count").textContent =
+            eventResult.data.length;
+    }
+
+    if ($("#registration-count")) {
+        $("#registration-count").textContent =
+            registrationResult.count ?? 0;
+    }
+
     const countMap = new Map(
-        countResult.data.map(item => [
-            item.event_id,
-            Number(item.registered_count)
-        ])
+        (countResult.data || []).map(function(item) {
+            return [
+                item.event_id,
+                Number(item.registered_count)
+            ];
+        })
     );
 
     const events = eventResult.data || [];
+    const table = $("#admin-events");
 
-    $("#admin-events").innerHTML = events.map(event => {
+    if (!table) return;
+
+    table.innerHTML = events.map(function(event) {
         const registered = countMap.get(event.id) || 0;
 
         return `
             <tr>
                 <td>${escapeHTML(event.title)}</td>
-
                 <td>${formatDate(event.event_date)}</td>
-
-                <td>${escapeHTML(event.location)}</td>
-
-                <td>
-                    ${registered} / ${event.capacity}
-                </td>
+                <td>${escapeHTML(event.location || "")}</td>
+                <td>${registered} / ${event.capacity}</td>
 
                 <td class="actions">
                     <a class="btn small"
@@ -656,10 +682,12 @@ async function loadAdminDashboard() {
         </tr>
     `;
 
-    $("#admin-events").addEventListener("click", async (event) => {
-        const id = event.target.dataset.delete;
+    table.onclick = async function(event) {
+        const button = event.target.closest("[data-delete]");
 
-        if (!id) return;
+        if (!button) return;
+
+        const id = button.dataset.delete;
 
         if (!confirm("Delete this event and its registrations?")) {
             return;
@@ -676,8 +704,9 @@ async function loadAdminDashboard() {
         }
 
         notify("Event deleted successfully.");
+
         await loadAdminDashboard();
-    });
+    };
 }
 
 // ========================================
@@ -696,7 +725,11 @@ async function handleEventForm() {
     const editing = Boolean(eventId);
 
     if (editing) {
-        $("#event-form-title").textContent = "Edit Event";
+        const heading = $("#event-form-title");
+
+        if (heading) {
+            heading.textContent = "Edit Event";
+        }
 
         const { data, error } = await supabase
             .from("events")
@@ -710,7 +743,7 @@ async function handleEventForm() {
         }
 
         for (const [key, value] of Object.entries(data)) {
-            const input = form.querySelector([name="${key}"]);
+            const input = form.querySelector('[name="' + key + '"]');
 
             if (input) {
                 input.value = value ?? "";
@@ -718,7 +751,7 @@ async function handleEventForm() {
         }
     }
 
-    form.addEventListener("submit", async (event) => {
+    form.addEventListener("submit", async function(event) {
         event.preventDefault();
 
         const data = getFormData(form);
@@ -763,7 +796,10 @@ async function loadParticipants() {
         return;
     }
 
-    const [eventResult, participantResult] = await Promise.all([
+    const [
+        eventResult,
+        participantResult
+    ] = await Promise.all([
         supabase
             .from("events")
             .select("title")
@@ -789,16 +825,28 @@ async function loadParticipants() {
             participantResult.error?.message,
             true
         );
+
         return;
     }
 
     const participants = participantResult.data || [];
 
-    $("#participants-title").textContent =
-        ${eventResult.data.title} — ${participants.length} participant(s);
+    const heading = $("#participants-title");
 
-    $("#participants-list").innerHTML = participants.map(
-        (participant, index) => `
+    if (heading) {
+        heading.textContent =
+            eventResult.data.title +
+            " — " +
+            participants.length +
+            " participant(s)";
+    }
+
+    const table = $("#participants-list");
+
+    if (!table) return;
+
+    table.innerHTML = participants.map(function(participant, index) {
+        return `
             <tr>
                 <td>${index + 1}</td>
 
@@ -820,8 +868,8 @@ async function loadParticipants() {
                     ).toLocaleString()}
                 </td>
             </tr>
-        `
-    ).join("") || `
+        `;
+    }).join("") || `
         <tr>
             <td colspan="4">
                 No participants registered yet.
@@ -831,16 +879,11 @@ async function loadParticipants() {
 }
 
 // ========================================
-// APPLICATION INITIALIZATION
+// INITIALIZE WEBSITE
 // ========================================
 
 async function initializeApp() {
-    if (!supabase) {
-        showSetupError();
-        return;
-    }
-
-    const page = document.body.dataset.page;
+    const page = document.body.dataset.page || "";
 
     const user = await getUser();
     const profile = await getProfile(user);
@@ -863,12 +906,13 @@ async function initializeApp() {
             break;
 
         case "student-dashboard":
+
             if (!user) {
                 location.href = "../login.html";
                 return;
             }
 
-            if (profile?.role !== "student") {
+            if (!profile || profile.role !== "student") {
                 location.href = "../index.html";
                 return;
             }
@@ -877,6 +921,7 @@ async function initializeApp() {
             break;
 
         case "event-detail":
+
             if (!user) {
                 location.href = "../login.html";
                 return;
@@ -894,7 +939,7 @@ async function initializeApp() {
                 return;
             }
 
-            if (profile?.role !== "admin") {
+            if (!profile || profile.role !== "admin") {
                 location.href = "../index.html";
                 return;
             }
@@ -914,7 +959,11 @@ async function initializeApp() {
     }
 }
 
-initializeApp().catch(error => {
+// ========================================
+// START APPLICATION
+// ========================================
+
+initializeApp().catch(function(error) {
     console.error("Application error:", error);
     notify("Something went wrong. Check the browser console.", true);
 });
